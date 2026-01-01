@@ -1,0 +1,63 @@
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.log
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# -------------------------
+# Virtual Environments
+# -------------------------
+venv/
+.env/
+.venv/
+env/
+ENV/
+
+# -------------------------
+# Jupyter
+# -------------------------
+.ipynb_checkpoints/
+*.ipynb_checkpoint
+
+# -------------------------
+# VS Code
+# -------------------------
+.vscode/
+.settings/
+
+# -------------------------
+# Environment Variables
+# -------------------------
+*.env
+.env.*
+
+# -------------------------
+# Data
+# -------------------------
+# Keep processed & interim private
+data/
+
+# Allow raw data if required by assignment
+# If you want to ignore raw too, uncomment next line
+# data/raw/
+
+# -------------------------
+# OS files
+# -------------------------
+.DS_Store
+Thumbs.db
+
+# -------------------------
+# HuggingFace / Tokens
+# -------------------------
+huggingface/
+token.txt
