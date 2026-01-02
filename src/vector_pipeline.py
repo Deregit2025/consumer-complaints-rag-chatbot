@@ -2,10 +2,12 @@
 
 import os
 import pandas as pd
+from tqdm import tqdm
+
+# LangChain imports for v0.0.214
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS
-from tqdm import tqdm
 
 # ======================
 # File paths
@@ -16,7 +18,7 @@ VECTOR_STORE_PATH = "vector_store/faiss_index"
 # ======================
 # Sampling configuration
 # ======================
-TOTAL_SAMPLE_SIZE = 12000  # You can adjust between 10k-15k
+TOTAL_SAMPLE_SIZE = 12000  # Adjust between 10k-15k
 TARGET_PRODUCTS = ["Credit card", "Personal loan", "Savings account", "Money transfers"]
 
 # ======================
@@ -33,7 +35,7 @@ EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 # ======================
 # Functions
 # ======================
-def stratified_sample(df: pd.DataFrame, target_col: str, total_sample_size: int):
+def stratified_sample(df: pd.DataFrame, target_col: str, total_sample_size: int) -> pd.DataFrame:
     """Perform stratified sampling across target categories."""
     n_categories = df[target_col].nunique()
     per_category = total_sample_size // n_categories
@@ -49,13 +51,18 @@ def create_chunks(df: pd.DataFrame, text_column: str):
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP
     )
+    
     chunks = []
     metadata = []
     
     for _, row in tqdm(df.iterrows(), total=len(df), desc="Chunking texts"):
-        complaint_text = row[text_column]
-        complaint_id = row["Complaint ID"]
-        product = row["Product_Category"]
+        complaint_text = row.get(text_column, "")
+        if not isinstance(complaint_text, str) or complaint_text.strip() == "":
+            continue  # Skip empty or invalid text
+
+        complaint_id = row.get("Complaint ID", "unknown")
+        product = row.get("Product_Category", "unknown")
+        
         chunk_texts = text_splitter.split_text(complaint_text)
         
         for idx, chunk in enumerate(chunk_texts):
@@ -65,6 +72,7 @@ def create_chunks(df: pd.DataFrame, text_column: str):
                 "product_category": product,
                 "chunk_index": idx
             })
+    
     return chunks, metadata
 
 # ======================
@@ -76,10 +84,16 @@ def main():
     print(f"Loading cleaned complaints from {CLEANED_CSV_PATH} ...")
     df = pd.read_csv(CLEANED_CSV_PATH)
     
+    # Ensure required columns exist
+    required_cols = ["Complaint ID", "Product_Category", "Complaint_Text"]
+    for col in required_cols:
+        if col not in df.columns:
+            raise ValueError(f"Missing required column in CSV: {col}")
+    
     # Keep only target products
     df = df[df["Product_Category"].isin(TARGET_PRODUCTS)].reset_index(drop=True)
     
-    print("Applying stratified sampling (~12k complaints)...")
+    print(f"Applying stratified sampling (~{TOTAL_SAMPLE_SIZE} complaints)...")
     df_sample = stratified_sample(df, target_col="Product_Category", total_sample_size=TOTAL_SAMPLE_SIZE)
     
     print("Creating text chunks ...")
