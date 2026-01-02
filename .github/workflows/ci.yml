@@ -1,0 +1,67 @@
+name: CI Pipeline – RAG Chatbot
+
+on:
+  push:
+    branches:
+      - main
+      - task-1
+      - task-2
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2️⃣ Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # 3️⃣ Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4️⃣ Verify core imports (Task 1 & Task 2)
+      - name: Verify Python imports
+        run: |
+          python - <<EOF
+          import pandas
+          import numpy
+          import sklearn
+          import langchain
+          import sentence_transformers
+          import faiss
+          print("✅ Core dependencies imported successfully")
+          EOF
+
+      # 5️⃣ Validate Task-1 scripts
+      - name: Validate Task-1 scripts
+        run: |
+          python - <<EOF
+          import src.data_processing
+          print("✅ data_processing.py imported successfully")
+          EOF
+
+      # 6️⃣ Validate Task-2 vector pipeline (import-only)
+      - name: Validate vector pipeline import
+        run: |
+          python - <<EOF
+          import src.vector_pipeline
+          print("✅ vector_pipeline.py imported successfully")
+          EOF
+
+      # 7️⃣ Lint check (lightweight, optional)
+      - name: Run basic lint check
+        run: |
+          pip install flake8
+          flake8 src --count --select=E9,F63,F7,F82 --show-source --statistics

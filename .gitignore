@@ -61,3 +61,8 @@ Thumbs.db
 # -------------------------
 huggingface/
 token.txt
+
+# Vector stores
+vector_store/
+*.faiss
+*.pkl
