@@ -1,49 +1,44 @@
 import os
-from transformers import pipeline
+import threading
+from transformers import pipeline, TextIteratorStreamer
 from src.retriever import ComplaintRetriever
 
-# Load HF token from environment (optional, if model is private)
 HF_TOKEN = os.getenv("HF_TOKEN")
 
+
 class RAGPipeline:
-    def __init__(self, retriever_model_name="all-MiniLM-L6-v2", llm_model_name="mistralai/Mistral-7B-Instruct-v0.2", device=-1):
-        # Initialize retriever with pre-built embeddings
+    def __init__(
+        self,
+        retriever_model_name="all-MiniLM-L6-v2",
+        llm_model_name="mistralai/Mistral-7B-Instruct-v0.2",
+        device=-1,
+    ):
         self.retriever = ComplaintRetriever(model_name=retriever_model_name)
 
-        # Initialize generator pipeline
+        # Generator pipeline
         self.generator = pipeline(
             "text-generation",
             model=llm_model_name,
-            device=device  # -1 for CPU, 0 for GPU
-            # use_auth_token removed because model should already be cached locally
+            device=device,
         )
 
     def ask(self, question, top_k=5):
-        """
-        Given a user question:
-        1. Retrieve top_k relevant complaint chunks.
-        2. Construct a prompt using the assignment template.
-        3. Generate the answer using the LLM.
-        Returns both the answer and retrieved chunks.
-        """
-        # Step 1: Retrieve
         retrieved_chunks = self.retriever.retrieve(question, top_k=top_k)
         if not retrieved_chunks:
             return "No relevant context found.", []
 
-        # Step 2: Build context string including metadata
         context_list = []
         for idx, chunk in enumerate(retrieved_chunks, 1):
-            # Use available metadata if exists
             text = chunk.get("text", "")
             company = chunk.get("company", "Unknown")
             issue = chunk.get("issue", "Unknown")
             date = chunk.get("date_received", "Unknown")
-            context_list.append(f"Chunk {idx} | Company: {company} | Issue: {issue} | Date: {date}\n{text}")
+            context_list.append(
+                f"Chunk {idx} | Company: {company} | Issue: {issue} | Date: {date}\n{text}"
+            )
 
         context = "\n\n".join(context_list)
 
-        # Step 3: Prompt engineering
         prompt = f"""
 You are a financial analyst assistant for CrediTrust. Your task is to answer questions about customer complaints. 
 Use the following retrieved complaint excerpts to formulate your answer. 
@@ -56,24 +51,71 @@ Question: {question}
 Answer:
 """
 
-        # Step 4: Generate response
-        generated = self.generator(prompt, max_new_tokens=256)
+        generated = self.generator(prompt, max_new_tokens=128)
         answer = generated[0]["generated_text"].split("Answer:")[-1].strip()
 
-        # Step 5: Return both answer and retrieved chunks
         return answer, retrieved_chunks
 
+    def ask_stream(self, question, top_k=5, max_new_tokens=128):
+        """
+        Streaming version for Gradio:
+        Yields the answer token-by-token.
+        """
+        retrieved_chunks = self.retriever.retrieve(question, top_k=top_k)
+        if not retrieved_chunks:
+            yield "No relevant context found.", []
+            return
 
-# ----------------------------
-# Example usage
-# ----------------------------
-if __name__ == "__main__":
-    rag = RAGPipeline(device=-1)  # CPU
-    question = "Which companies have billing disputes?"
-    response, chunks = rag.ask(question, top_k=5)
+        context_list = []
+        for idx, chunk in enumerate(retrieved_chunks, 1):
+            text = chunk.get("text", "")
+            company = chunk.get("company", "Unknown")
+            issue = chunk.get("issue", "Unknown")
+            date = chunk.get("date_received", "Unknown")
+            context_list.append(
+                f"Chunk {idx} | Company: {company} | Issue: {issue} | Date: {date}\n{text}"
+            )
 
-    print("Generated Response:")
-    print(response)
-    print("\nRetrieved Chunks:")
-    for c in chunks:
-        print(c)
+        context = "\n\n".join(context_list)
+
+        prompt = f"""
+You are a financial analyst assistant for CrediTrust. Your task is to answer questions about customer complaints. 
+Use the following retrieved complaint excerpts to formulate your answer. 
+If the context doesn't contain the answer, state that you don't have enough information.
+
+Context: {context}
+
+Question: {question}
+
+Answer:
+"""
+
+        # Set up streamer with tokenizer
+        streamer = TextIteratorStreamer(
+            self.generator.tokenizer,
+            skip_special_tokens=True,
+            skip_prompt=True,
+        )
+
+        # Encode prompt
+        inputs = self.generator.tokenizer(
+            prompt, return_tensors="pt"
+        ).to(self.generator.device)
+
+        # Generate in a thread
+        thread = threading.Thread(
+            target=self.generator.model.generate,
+            kwargs={
+                "input_ids": inputs["input_ids"],
+                "attention_mask": inputs["attention_mask"],
+                "max_new_tokens": max_new_tokens,
+                "streamer": streamer,
+            },
+        )
+        thread.start()
+
+        # Stream token-by-token
+        answer_text = ""
+        for new_text in streamer:
+            answer_text += new_text
+            yield answer_text, retrieved_chunks
