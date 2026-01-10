@@ -1,91 +1,35 @@
 import gradio as gr
 from src.rag_pipeline import RAGPipeline
 
-# Initialize RAG pipeline (load once)
-rag = RAGPipeline(device=-1)  # CPU
+# Initialize RAG pipeline
+rag = RAGPipeline(device=-1)  # CPU, change to 0 if GPU is available
 
-def ask_question(question, top_k):
-    if not question.strip():
-        return "", "Please enter a question."
+def ask_question(user_question):
+    """
+    Generator function for Gradio to stream answers token by token.
+    Returns answer as it is generated, along with retrieved sources.
+    """
+    for answer, chunks in rag.ask_stream(user_question, top_k=5):
+        # Build a simple sources string
+        sources = "\n\n".join([f"Chunk {i+1} | Company: {c.get('company','Unknown')} | Issue: {c.get('issue','Unknown')} | Date: {c.get('date_received','Unknown')}\n{c.get('text','')}" 
+                               for i, c in enumerate(chunks)])
+        yield answer, sources
 
-    answer, chunks = rag.ask(question, top_k=top_k)
-
-    # Format retrieved sources for display
-    if not chunks:
-        sources_text = "No sources retrieved."
-    else:
-        formatted_sources = []
-        for i, chunk in enumerate(chunks, 1):
-            meta = chunk.get("metadata", {})
-            text = chunk.get("document", "")
-
-            company = meta.get("company", "Unknown")
-            issue = meta.get("issue", "Unknown")
-            date = meta.get("date_received", "Unknown")
-
-            formatted_sources.append(
-                f"Source {i}\n"
-                f"Company: {company}\n"
-                f"Issue: {issue}\n"
-                f"Date: {date}\n"
-                f"Excerpt: {text}\n"
-            )
-
-        sources_text = "\n" + "\n".join(formatted_sources)
-
-    return answer, sources_text
-
-
-def clear_fields():
-    return "", "", ""
-
-
-# ----------------------------
 # Gradio UI
-# ----------------------------
-with gr.Blocks(title="CrediTrust Complaint Assistant") as demo:
-    gr.Markdown("## 💬 CrediTrust RAG-Based Complaint Assistant")
-    gr.Markdown(
-        "Ask questions about customer complaints. "
-        "The system retrieves relevant complaint excerpts and generates answers with sources."
-    )
+with gr.Blocks() as demo:
+    gr.Markdown("## CrediTrust Complaint Analyzer (RAG Chatbot)")
 
-    question_input = gr.Textbox(
-        label="Enter your question",
-        placeholder="e.g. Which companies have billing disputes?",
-        lines=2
-    )
+    with gr.Row():
+        txt_input = gr.Textbox(label="Ask a question about complaints:", placeholder="Type your question here...")
+        btn = gr.Button("Ask")
 
-    top_k_slider = gr.Slider(
-        minimum=1,
-        maximum=10,
-        value=5,
-        step=1,
-        label="Number of retrieved sources (Top-K)"
-    )
+    answer_output = gr.Textbox(label="AI Answer", interactive=False)
+    sources_output = gr.Textbox(label="Retrieved Sources", interactive=False)
 
-    ask_button = gr.Button("Ask")
-    clear_button = gr.Button("Clear")
+    btn.click(ask_question, inputs=txt_input, outputs=[answer_output, sources_output])
 
-    answer_output = gr.Textbox(
-        label="AI Generated Answer",
-        lines=5
-    )
+    gr.Button("Clear").click(lambda: ("", ""), inputs=[], outputs=[txt_input, answer_output, sources_output])
 
-    sources_output = gr.Textbox(
-        label="Retrieved Sources",
-        lines=15
-    )
-
-    ask_button.click(
-        fn=ask_question,
-        inputs=[question_input, top_k_slider],
-        outputs=[answer_output, sources_output]
-    )
-
-    clear_button.click(
-        fn=clear_fields,
-        outputs=[question_input, answer_output, sources_output]
-    )
-
-demo.launch()
+# Launch app
+if __name__ == "__main__":
+    demo.launch(server_name="127.0.0.1", server_port=7860, share=False)
