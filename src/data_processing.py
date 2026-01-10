@@ -9,13 +9,18 @@ from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 import emoji
 from pathlib import Path
+from typing import Optional
 
 # ======================
 # NLTK setup (safe)
 # ======================
-nltk.download("stopwords", quiet=True)
-nltk.download("punkt", quiet=True)
-nltk.download("wordnet", quiet=True)
+try:
+    nltk.download("stopwords", quiet=True)
+    nltk.download("punkt", quiet=True)
+    nltk.download("wordnet", quiet=True)
+except Exception as e:
+    print(f"NLTK setup failed: {e}")
+    raise
 
 lemmatizer = WordNetLemmatizer()
 stop_words = set(stopwords.words("english"))
@@ -49,11 +54,13 @@ mapping_rules = {
     ]
 }
 
-PRODUCT_LOOKUP = {
-    raw: mapped
-    for mapped, raw_list in mapping_rules.items()
-    for raw in raw_list
-}
+# Build PRODUCT_LOOKUP safely
+PRODUCT_LOOKUP = {}
+for mapped_category, raw_list in mapping_rules.items():
+    for raw_name in raw_list:
+        if raw_name in PRODUCT_LOOKUP:
+            raise ValueError(f"Duplicate mapping found for '{raw_name}'")
+        PRODUCT_LOOKUP[raw_name] = mapped_category
 
 TARGET_PRODUCTS = list(mapping_rules.keys())
 
@@ -61,6 +68,20 @@ TARGET_PRODUCTS = list(mapping_rules.keys())
 # Text cleaning
 # ======================
 def clean_text(text: str) -> str:
+    """
+    Clean a raw complaint narrative.
+
+    Steps:
+    - Remove HTML, URLs, emails, phone numbers, emojis
+    - Remove patterns like 'xxx', punctuation, normalize spaces
+    - Tokenize and lemmatize, remove stopwords
+
+    Args:
+        text (str): Raw complaint text
+
+    Returns:
+        str: Cleaned text
+    """
     if not isinstance(text, str) or text.strip() == "":
         return ""
 
@@ -93,10 +114,26 @@ def clean_text(text: str) -> str:
 
     return " ".join(tokens)
 
+
 # ======================
 # Main processing
 # ======================
-def process_complaints(df: pd.DataFrame, max_samples=100_000) -> pd.DataFrame:
+def process_complaints(df: pd.DataFrame, max_samples: int = 100_000) -> pd.DataFrame:
+    """
+    Process raw complaints DataFrame: map products, clean text, stratified sampling.
+
+    Args:
+        df (pd.DataFrame): Raw complaints data
+        max_samples (int): Max number of samples after stratified sampling
+
+    Returns:
+        pd.DataFrame: Cleaned and sampled complaints
+    """
+    required_cols = ["Product", "Consumer complaint narrative"]
+    missing_cols = [c for c in required_cols if c not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}")
+
     print("Mapping product categories...")
     df["Product_Category"] = df["Product"].map(PRODUCT_LOOKUP)
 
@@ -120,7 +157,7 @@ def process_complaints(df: pd.DataFrame, max_samples=100_000) -> pd.DataFrame:
     df["Complaint_Text"] = df["Complaint_Text"].str.slice(0, 5000)
 
     # ======================
-    # Stratified sampling (NO deprecated apply)
+    # Stratified sampling
     # ======================
     print("Applying stratified sampling...")
     per_class = max_samples // len(TARGET_PRODUCTS)
@@ -132,12 +169,21 @@ def process_complaints(df: pd.DataFrame, max_samples=100_000) -> pd.DataFrame:
 
     return sampled_df
 
+
 # ======================
 # Pipeline
 # ======================
-def run_pipeline():
-    print(f"Loading raw data from {RAW_PATH} ...")
-    df = pd.read_csv(RAW_PATH, low_memory=False)
+def run_pipeline() -> pd.DataFrame:
+    """
+    Run the full pipeline: load raw CSV, process complaints, save processed CSV.
+    """
+    try:
+        print(f"Loading raw data from {RAW_PATH} ...")
+        df = pd.read_csv(RAW_PATH, low_memory=False)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"{RAW_PATH} not found.")
+    except pd.errors.ParserError:
+        raise ValueError(f"Unable to parse {RAW_PATH}")
 
     processed_df = process_complaints(df)
 
@@ -151,6 +197,7 @@ def run_pipeline():
     print(processed_df["Product_Category"].value_counts())
 
     return processed_df
+
 
 # ======================
 # Entry point
